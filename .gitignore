@@ -33,6 +33,9 @@ Thumbs.db
 *.pt
 !yolov8n.pt
 
+# EasyOCR models (downloaded once to project)
+models/
+
 # Uploaded Images
 media/uploads/*
 media/processed/*

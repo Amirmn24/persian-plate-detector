@@ -3,10 +3,19 @@
 با استفاده از YOLO برای تشخیص پلاک و EasyOCR برای خواندن متن
 """
 
+import os
 import cv2
 import numpy as np
 import re
+import time
 from ultralytics import YOLO
+
+# مسیر ریشه پروژه (یک سطح بالاتر از utlis)
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# مسیر پیش‌فرض مدل YOLO در پروژه تا هر بار از اینترنت دانلود نشود
+_DEFAULT_YOLO_MODEL = os.path.join(_PROJECT_ROOT, "yolov8n.pt")
+# پوشه ذخیره مدل‌های EasyOCR در پروژه (یک بار دانلود، بعداً از همینجا بارگذاری می‌شود)
+_EASYOCR_MODEL_DIR = os.path.join(_PROJECT_ROOT, "models", "easyocr")
 
 
 class IranianPlateReader:
@@ -23,34 +32,85 @@ class IranianPlateReader:
         'ه': 'ه', 'ی': 'ی',
     }
     
-    def __init__(self, plate_model_path="yolov8n.pt", confidence=0.3):
+    def __init__(self, plate_model_path=None, confidence=0.3):
         """
         مقداردهی اولیه
         
         Args:
-            plate_model_path: مسیر مدل YOLO برای تشخیص پلاک
+            plate_model_path: مسیر مدل YOLO برای تشخیص پلاک (پیش‌فرض: yolov8n.pt داخل پروژه)
             confidence: حداقل میزان اطمینان برای تشخیص
         """
-        print(f"[*] در حال بارگذاری مدل تشخیص پلاک...")
+        if plate_model_path is None or plate_model_path == "yolov8n.pt":
+            plate_model_path = _DEFAULT_YOLO_MODEL if os.path.isfile(_DEFAULT_YOLO_MODEL) else "yolov8n.pt"
+        elif not os.path.isabs(plate_model_path) and not os.path.isfile(plate_model_path):
+            local = os.path.join(_PROJECT_ROOT, plate_model_path)
+            if os.path.isfile(local):
+                plate_model_path = local
+        print(f"[*] در حال بارگذاری مدل تشخیص پلاک از: {plate_model_path}")
         self.plate_model = YOLO(plate_model_path)
         self.confidence = confidence
         self.ocr_reader = None  # به صورت lazy load
+        self._ocr_failed = False  # اگر دانلود OCR شکست خورد، دوباره تلاش نکن
         print("[+] مدل تشخیص پلاک آماده است!")
     
     def _get_ocr_reader(self):
-        """دریافت یا ایجاد OCR reader (lazy loading)"""
+        """دریافت یا ایجاد OCR reader (lazy loading) با تلاش مجدد و ذخیره محلی"""
+        if self._ocr_failed:
+            return None
         if self.ocr_reader is None:
             try:
                 import easyocr
-                print("[*] در حال بارگذاری مدل OCR فارسی...")
-                self.ocr_reader = easyocr.Reader(['fa', 'en'], gpu=False)
-                print("[+] مدل OCR آماده است!")
             except ImportError:
                 print("[!] خطا: کتابخانه easyocr نصب نیست.")
                 print("    لطفا با دستور زیر نصب کنید:")
                 print("    pip install easyocr")
+                self._ocr_failed = True
                 return None
+            os.makedirs(_EASYOCR_MODEL_DIR, exist_ok=True)
+            max_attempts = 3
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    print(f"[*] در حال بارگذاری مدل OCR فارسی (تلاش {attempt}/{max_attempts})...")
+                    if attempt > 1:
+                        time.sleep(5)
+                    self.ocr_reader = easyocr.Reader(
+                        ['fa', 'en'],
+                        gpu=False,
+                        model_storage_directory=_EASYOCR_MODEL_DIR,
+                        download_enabled=True,
+                    )
+                    print("[+] مدل OCR آماده است!")
+                    return self.ocr_reader
+                except Exception as e:
+                    err_msg = str(e).lower()
+                    if "retrieval incomplete" in err_msg or "urlopen" in err_msg or "got only" in err_msg:
+                        print(f"[!] دانلود مدل OCR ناقص بود (تلاش {attempt}/{max_attempts}). پاک‌سازی cache و تلاش مجدد...")
+                        self._remove_incomplete_easyocr_models()
+                        self.ocr_reader = None
+                    else:
+                        print(f"[!] خطا در بارگذاری OCR: {e}")
+                        self._ocr_failed = True
+                        return None
+            print("[!] پس از چند تلاش، مدل OCR بارگذاری نشد. فقط تشخیص پلاک بدون خواندن متن انجام می‌شود.")
+            self._ocr_failed = True
         return self.ocr_reader
+    
+    @staticmethod
+    def _remove_incomplete_easyocr_models():
+        """پاک کردن فایل‌های ناقص مدل EasyOCR تا در تلاش بعدی دوباره دانلود شوند."""
+        if not os.path.isdir(_EASYOCR_MODEL_DIR):
+            return
+        try:
+            for name in os.listdir(_EASYOCR_MODEL_DIR):
+                path = os.path.join(_EASYOCR_MODEL_DIR, name)
+                if os.path.isfile(path):
+                    os.remove(path)
+                elif os.path.isdir(path):
+                    for sub in os.listdir(path):
+                        os.remove(os.path.join(path, sub))
+                    os.rmdir(path)
+        except OSError:
+            pass
     
     def detect_plate_region(self, vehicle_image, vehicle_bbox=None):
         """
