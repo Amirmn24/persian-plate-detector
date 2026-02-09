@@ -84,7 +84,9 @@ python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
 python download_plate_model.py
 ```
 
-اگر دانلود خودکار ناموفق بود، فایل `plateYolo.pt` را از [صفحه مدل‌های PLPR](https://github.com/truthofmatthew/persian-license-plate-recognition/tree/main/model) دانلود کنید و در پوشه `model` با همین نام ذخیره کنید. بدون این فایل، سیستم فقط از روش تشخیص با رنگ/شکل استفاده می‌کند که برای پلاک‌های کوچک یا نامشخص دقت کمتری دارد.
+اگر دانلود خودکار ناموفق بود، فایل `plateYolo.pt` را از [صفحه مدل‌های PLPR](https://github.com/truthofmatthew/persian-license-plate-recognition/tree/main/model) دانلود کنید و در پوشه `model` با همین نام ذخیره کنید. بدون این فایل، سیستم فقط از روش تشخیص با رنگ/شکل استفاده می‌کند.
+
+برای **استخراج اعداد و حرف فارسی از روی پلاک** (مثلاً «۱۲ پ ۳۴۵ - ۶۷») مدل `CharsYolo.pt` از همان صفحه را هم در پوشه `model` قرار دهید. در صورت نبود این فایل، از EasyOCR برای خواندن متن پلاک استفاده می‌شود.
 
 ### تنظیمات EasyOCR
 
