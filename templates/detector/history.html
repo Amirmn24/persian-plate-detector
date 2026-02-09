@@ -57,6 +57,7 @@
                         <th>پیش‌نمایش</th>
                         <th>وضعیت</th>
                         <th>تعداد خودرو</th>
+                        <th>پلاک</th>
                         <th>تاریخ</th>
                         <th>عملیات</th>
                     </tr>
@@ -97,6 +98,28 @@
                                             <i class="fas fa-truck"></i>
                                         {% endif %}
                                     {% endfor %}
+                                </small>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if img.has_plate %}
+                                <span class="badge bg-primary">
+                                    <i class="fas fa-id-card"></i> {{ img.plate_count }}
+                                </span>
+                                {% if img.plate_data %}
+                                    <br>
+                                    <small style="direction: rtl; font-size: 11px;">
+                                        {% for plate in img.plate_data %}
+                                            {% if plate.parsed %}
+                                                {{ plate.parsed.formatted }}
+                                                {% if not forloop.last %}<br>{% endif %}
+                                            {% endif %}
+                                        {% endfor %}
+                                    </small>
+                                {% endif %}
+                            {% else %}
+                                <small class="text-muted">
+                                    <i class="fas fa-minus"></i>
                                 </small>
                             {% endif %}
                         </td>

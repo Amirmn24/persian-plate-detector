@@ -38,6 +38,23 @@ class UploadedImage(models.Model):
         verbose_name='تصویر پردازش شده'
     )
     
+    # فیلدهای مربوط به پلاک
+    has_plate = models.BooleanField(
+        default=False,
+        verbose_name='دارای پلاک'
+    )
+    
+    plate_count = models.IntegerField(
+        default=0,
+        verbose_name='تعداد پلاک'
+    )
+    
+    plate_data = models.JSONField(
+        null=True,
+        blank=True,
+        verbose_name='اطلاعات پلاک'
+    )
+    
     class Meta:
         verbose_name = 'تصویر آپلود شده'
         verbose_name_plural = 'تصاویر آپلود شده'

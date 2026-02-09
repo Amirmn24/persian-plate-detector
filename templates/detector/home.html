@@ -60,6 +60,9 @@
                             {% if img.has_vehicle %}
                                 <i class="fas fa-check-circle text-success"></i>
                                 {{ img.vehicle_count }} خودرو
+                                {% if img.has_plate %}
+                                    <br><small><i class="fas fa-id-card text-primary"></i> {{ img.plate_count }} پلاک</small>
+                                {% endif %}
                             {% else %}
                                 <i class="fas fa-times-circle text-danger"></i>
                                 بدون خودرو
