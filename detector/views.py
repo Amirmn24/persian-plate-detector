@@ -49,89 +49,87 @@ def home(request):
                 result = det.detect_vehicles(image_path)
                 
                 if result:
-                    # ذخیره نتایج در دیتابیس
                     uploaded_image.has_vehicle = result['has_vehicle']
                     uploaded_image.vehicle_count = result['vehicle_count']
                     uploaded_image.detection_result = result
                     
-                    # رسم کادر دور خودروها و تشخیص پلاک
+                    image = cv2.imread(image_path)
+                    reader = get_plate_reader()
+                    all_plates = []
+                    
                     if result['has_vehicle']:
-                        # بارگذاری تصویر برای پردازش
-                        image = cv2.imread(image_path)
-                        
-                        # تشخیص پلاک برای هر خودرو
-                        reader = get_plate_reader()
-                        all_plates = []
-                        
+                        # تشخیص پلاک روی هر خودرو
                         for vehicle in result['vehicles']:
                             x1, y1, x2, y2 = vehicle['bbox']
-                            
-                            # پردازش پلاک
                             plate_result = reader.process_vehicle(image, (x1, y1, x2, y2))
-                            
                             if plate_result and plate_result['has_plate']:
                                 vehicle['plate_info'] = plate_result
                                 all_plates.extend(plate_result['plates'])
-                        
-                        # ذخیره اطلاعات پلاک
-                        uploaded_image.has_plate = len(all_plates) > 0
-                        uploaded_image.plate_count = len(all_plates)
-                        uploaded_image.plate_data = all_plates
-                        uploaded_image.detection_result = result
-                        
-                        # ساخت مسیر خروجی
+                    else:
+                        # خودرو پیدا نشد — یک بار به‌طور مجزا روی کل تصویر برای پلاک جستجو کن
+                        plates = reader.detect_plate_region(image)
+                        for plate in plates:
+                            px1, py1, px2, py2 = plate['bbox']
+                            plate_image = image[py1:py2, px1:px2]
+                            if plate_image.size == 0:
+                                continue
+                            text = reader.read_plate_text(plate_image)
+                            parsed = reader.parse_iranian_plate(text) if text else None
+                            all_plates.append({
+                                'bbox': (px1, py1, px2, py2),
+                                'relative_bbox': (px1, py1, px2, py2),
+                                'confidence': plate['confidence'],
+                                'text': text,
+                                'parsed': parsed,
+                            })
+                    
+                    uploaded_image.has_plate = len(all_plates) > 0
+                    uploaded_image.plate_count = len(all_plates)
+                    uploaded_image.plate_data = all_plates
+                    uploaded_image.detection_result = result
+                    
+                    # رسم و ذخیره در صورت وجود خودرو یا پلاک
+                    if result['has_vehicle'] or all_plates:
                         processed_dir = os.path.join(
-                            settings.MEDIA_ROOT, 
+                            settings.MEDIA_ROOT,
                             'processed',
                             uploaded_image.uploaded_at.strftime('%Y/%m/%d')
                         )
                         os.makedirs(processed_dir, exist_ok=True)
-                        
                         filename = os.path.basename(image_path)
                         processed_path = os.path.join(processed_dir, f'detected_{filename}')
                         
-                        # رسم کادرها
                         colors = {
                             "car": (0, 255, 0),
                             "motorcycle": (255, 0, 0),
                             "bus": (0, 165, 255),
                             "truck": (0, 0, 255),
                         }
+                        if result['has_vehicle']:
+                            for vehicle in result['vehicles']:
+                                x1, y1, x2, y2 = vehicle['bbox']
+                                color = colors.get(vehicle['type'], (255, 255, 255))
+                                label = f"{vehicle['type']} ({vehicle['confidence']:.0%})"
+                                cv2.rectangle(image, (x1, y1), (x2, y2), color, 3)
+                                label_size, _ = cv2.getTextSize(
+                                    label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2
+                                )
+                                cv2.rectangle(
+                                    image,
+                                    (x1, y1 - label_size[1] - 15),
+                                    (x1 + label_size[0] + 10, y1),
+                                    color, -1,
+                                )
+                                cv2.putText(
+                                    image, label, (x1 + 5, y1 - 8),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2,
+                                )
                         
-                        for vehicle in result['vehicles']:
-                            x1, y1, x2, y2 = vehicle['bbox']
-                            color = colors.get(vehicle['type'], (255, 255, 255))
-                            label = f"{vehicle['type']} ({vehicle['confidence']:.0%})"
-                            
-                            # رسم کادر خودرو
-                            cv2.rectangle(image, (x1, y1), (x2, y2), color, 3)
-                            
-                            # رسم برچسب
-                            label_size, _ = cv2.getTextSize(
-                                label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2
-                            )
-                            cv2.rectangle(
-                                image,
-                                (x1, y1 - label_size[1] - 15),
-                                (x1 + label_size[0] + 10, y1),
-                                color,
-                                -1,
-                            )
-                            cv2.putText(
-                                image, label, (x1 + 5, y1 - 8),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2,
-                            )
-                        
-                        # رسم کادر پلاک‌ها
                         for plate in all_plates:
                             px1, py1, px2, py2 = plate['bbox']
-                            # رسم کادر پلاک (قرمز)
                             cv2.rectangle(image, (px1, py1), (px2, py2), (0, 0, 255), 2)
-                            
-                            # اگر متن پلاک خوانده شده، نمایش آن
                             if plate.get('parsed') and plate['parsed'].get('formatted'):
                                 plate_text = plate['parsed']['formatted']
-                                # رسم متن پلاک
                                 text_size, _ = cv2.getTextSize(
                                     plate_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2
                                 )
@@ -139,8 +137,7 @@ def home(request):
                                     image,
                                     (px1, py2 + 5),
                                     (px1 + text_size[0] + 10, py2 + text_size[1] + 15),
-                                    (0, 0, 255),
-                                    -1,
+                                    (0, 0, 255), -1,
                                 )
                                 cv2.putText(
                                     image, plate_text, (px1 + 5, py2 + text_size[1] + 10),
@@ -148,8 +145,6 @@ def home(request):
                                 )
                         
                         cv2.imwrite(processed_path, image)
-                        
-                        # ذخیره مسیر نسبی
                         relative_path = os.path.join(
                             'processed',
                             uploaded_image.uploaded_at.strftime('%Y/%m/%d'),
@@ -159,12 +154,20 @@ def home(request):
                     
                     uploaded_image.save()
                     
-                    # نمایش پیام موفقیت
-                    if result['has_vehicle']:
-                        plate_msg = f" و {uploaded_image.plate_count} پلاک" if uploaded_image.has_plate else ""
+                    if result['has_vehicle'] and uploaded_image.has_plate:
                         messages.success(
-                            request, 
-                            f"✅ {result['vehicle_count']} خودرو{plate_msg} در تصویر شناسایی شد!"
+                            request,
+                            f"✅ {result['vehicle_count']} خودرو و {uploaded_image.plate_count} پلاک در تصویر شناسایی شد!"
+                        )
+                    elif result['has_vehicle']:
+                        messages.success(
+                            request,
+                            f"✅ {result['vehicle_count']} خودرو در تصویر شناسایی شد!"
+                        )
+                    elif uploaded_image.has_plate:
+                        messages.success(
+                            request,
+                            f"✅ {uploaded_image.plate_count} پلاک در تصویر شناسایی شد (بدون تشخیص خودرو)."
                         )
                     else:
                         messages.info(request, "ℹ️ هیچ خودرویی در تصویر شناسایی نشد.")

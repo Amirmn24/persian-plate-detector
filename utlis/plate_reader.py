@@ -100,7 +100,7 @@ class IranianPlateReader:
                     "ultralytics/yolov5", "custom", path=chars_path,
                     force_reload=False, trust_repo=True,
                 )
-                self._chars_model.conf = 0.25
+                self._chars_model.conf = 0.2
                 print("[+] مدل کاراکتر پلاک آماده است!")
             except Exception as e:
                 print(f"[!] مدل CharsYolo بارگذاری نشد: {e}. از OCR برای خواندن متن استفاده می‌شود.")
@@ -384,25 +384,53 @@ class IranianPlateReader:
                     is_digit = persian_char in PERSIAN_DIGITS
                     if is_digit and conf < 0.35:
                         continue
-                    if not is_digit and conf < 0.2:
+                    if not is_digit and conf < 0.08:
                         continue
                     cx = (x1 + x2) / 2
                     dets.append((cx, persian_char))
             if not dets:
                 return None
-            # پلاک ایرانی معمولاً راست‌به‌چپ است؛ ترتیب راست→چپ = بزرگ‌ترین x اول
             dets.sort(key=lambda x: x[0])
             text_ltr = "".join(c for _, c in dets)
             text_rtl = "".join(c for _, c in reversed(dets))
             has_letter_ltr = any(c not in PERSIAN_DIGITS for c in text_ltr)
             has_letter_rtl = any(c not in PERSIAN_DIGITS for c in text_rtl)
-            # ترجیح راست‌به‌چپ تا فرمت «۲ رقم + حرف + ۳ رقم + ۲ رقم» درست باشد (مثلاً ۹۱ ع ۷۸۳ - ۳۷)
             if has_letter_rtl:
                 text = text_rtl
             elif has_letter_ltr:
                 text = text_ltr
             else:
                 text = text_rtl if len(text_rtl) >= len(text_ltr) else text_ltr
+            # اگر فقط رقم آمد، یک بار با آستانهٔ خیلی پایین فقط برای حرف امتحان کن
+            if text and not any(c not in PERSIAN_DIGITS for c in text) and len(dets) >= 5:
+                old_conf = self._chars_model.conf
+                try:
+                    self._chars_model.conf = 0.08
+                    res2 = self._chars_model(img_rgb)
+                    pred2 = res2.pred[0]
+                    if pred2 is not None and pred2.shape[0] > 0:
+                        x_min_all = min(d[0] for d in dets)
+                        x_max_all = max(d[0] for d in dets)
+                        for i in range(pred2.shape[0]):
+                            x1, y1, x2, y2 = pred2[i, :4].tolist()
+                            conf = float(pred2[i, 4])
+                            cls = int(pred2[i, 5])
+                            if conf < 0.08 or cls >= len(_CHARS_LABEL_MAP):
+                                continue
+                            label = _CHARS_LABEL_MAP[cls]
+                            persian_char = _CHARS_LABEL_TO_PERSIAN.get(label, label)
+                            if persian_char in PERSIAN_DIGITS:
+                                continue
+                            cx = (x1 + x2) / 2
+                            if x_min_all <= cx <= x_max_all:
+                                dets.append((cx, persian_char))
+                                dets.sort(key=lambda x: x[0])
+                                text_rtl = "".join(c for _, c in reversed(dets))
+                                text_ltr = "".join(c for _, c in dets)
+                                text = text_rtl if len(text_rtl) >= len(text_ltr) else text_ltr
+                                break
+                finally:
+                    self._chars_model.conf = old_conf
             return text if len(text) >= 5 else None
         except Exception as e:
             print(f"[!] خطا در استخراج کاراکتر پلاک: {e}")
@@ -415,10 +443,33 @@ class IranianPlateReader:
         en_to_fa = str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")
         return text.translate(en_to_fa)
 
+    def _extract_letter_from_ocr(self, plate_image):
+        """
+        وقتی CharsYolo حرف نیاورده، با EasyOCR سعی می‌کنیم حرف پلاک را استخراج کنیم.
+        فرمت: ۲ رقم + حرف + ۳ رقم + ۲ رقم، حرف معمولاً ع است.
+        """
+        reader = self._get_ocr_reader()
+        if reader is None:
+            return None
+        PERSIAN_LETTERS = set("آبپتثجچحخدذرزژسشصضطظعغفقکگلمنوهی")
+        try:
+            processed = self._preprocess_plate_image(plate_image)
+            results = reader.readtext(processed)
+            for (_, ocr_text, conf) in results:
+                if conf < 0.25:
+                    continue
+                for c in ocr_text:
+                    if c in PERSIAN_LETTERS:
+                        return c
+        except Exception:
+            pass
+        return None
+
     def read_plate_text(self, plate_image):
         """
         استخراج متن پلاک (اعداد و حرف فارسی).
         در صورت وجود مدل CharsYolo از آن استفاده می‌شود، وگرنه از EasyOCR.
+        اگر CharsYolo فقط ۷ رقم برگرداند، با EasyOCR سعی می‌کنیم حرف را استخراج کنیم.
         """
         text = None
         if self._chars_model is not None:
@@ -436,6 +487,15 @@ class IranianPlateReader:
                     print(f"[!] خطا در OCR: {e}")
         if text:
             text = self._normalize_to_persian_digits(text.strip())
+        # اگر فقط ۷ رقم داریم و حرفی نیست، با EasyOCR حرف را پیدا کن. ترتیب نمایش: ۲ رقم + حرف + ۳ رقم + ۲ رقم
+        if text:
+            digits = re.findall(r"[۰-۹0-9]", text)
+            letters = re.findall(r"[آ-ی]", text)
+            if len(digits) == 7 and len(letters) == 0:
+                letter = self._extract_letter_from_ocr(plate_image)
+                if letter:
+                    rev = digits[::-1]
+                    text = "".join(rev[5:7]) + letter + "".join(rev[2:5]) + "".join(rev[0:2])
         return text
     
     def _preprocess_plate_image(self, image):
@@ -535,9 +595,9 @@ class IranianPlateReader:
     
     def _parse_flexible(self, text):
         """
-        تجزیه ۷ رقم (+ در صورت وجود حرف) و نمایش به فرمت پلاک: ۱۲ ط ۲۵۲ - ۵۱.
-        وقتی مدل ارقام را برعکس ترتیب واقعی می‌دهد (مثلاً ۲۱۲۵۲۱۵ به‌جای ۱۲۲۵۲۵۱)،
-        دو رقم اول و دو رقم آخر را برعکس می‌کنیم تا خروجی ۱۲ ط ۲۵۲ - ۵۱ شود.
+        تجزیه ۷ رقم (+ در صورت وجود حرف) و نمایش همیشه از چپ به راست: ۱۲ ط ۲۵۲ - ۵۱.
+        اگر مدل ترتیب را برعکس داده باشد، کل رشتهٔ ۷رقمی را یک‌بار وارون می‌کنیم،
+        بعد به صورت ۲ + ۳ + ۲ تقسیم می‌کنیم تا هر سه بخش (از جمله بخش ۳رقمی) درست نمایش داده شوند.
         """
         digits = re.findall(r"[۰-۹0-9]", text)
         letters = re.findall(r"[آ-ی]", text)
@@ -546,11 +606,11 @@ class IranianPlateReader:
         if len(all_digits) < 7:
             return None
         letter = letters[0] if letters else "?"
-        # پلاک استاندارد: بخش اول ۲ رقم، وسط ۳ رقم، آخر ۲ رقم. اگر مدل ترتیب را برعکس داده،
-        # دو رقم اول و دو رقم آخر را وارون می‌کنیم تا نمایش درست شود (مثلاً ۲۱→۱۲، ۱۵→۵۱).
-        part1 = all_digits[1] + all_digits[0]
-        part2 = all_digits[2:5]
-        part3 = all_digits[6] + all_digits[5]
+        # وارون کردن کل ۷ رقم تا نمایش از چپ به راست درست شود (۱۲، ۲۵۲، ۵۱)
+        rev = all_digits[::-1]
+        part1 = rev[5:7]
+        part2 = rev[2:5]
+        part3 = rev[0:2]
         formatted = f"{part1} {letter} {part2} - {part3}"
         return {
             "full_text": text,
