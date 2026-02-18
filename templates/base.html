@@ -184,6 +184,131 @@
             text-align: center;
             margin-bottom: 40px;
         }
+
+        /* پلاک ایران - چپ به راست: نوار آبی | شماره اصلی | ایران + کد شهر */
+        .iran-plate {
+            display: flex;
+            flex-direction: row;
+            width: 100%;
+            max-width: 420px;
+            min-height: 100px;
+            margin: 0 auto;
+            border: 3px solid #000;
+            border-radius: 6px;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+            font-family: 'Vazirmatn', sans-serif;
+            direction: ltr;
+        }
+        .iran-plate-blue {
+            width: 18%;
+            min-width: 52px;
+            background: #003399;
+            color: #fff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 6px 4px;
+        }
+        .iran-plate-flag {
+            width: 90%;
+            max-width: 36px;
+            height: 24px;
+            border: 1px solid rgba(0,0,0,0.2);
+            border-radius: 2px;
+            overflow: hidden;
+            margin-bottom: 6px;
+        }
+        .iran-plate-flag svg {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        .iran-plate-flag-lion-sun {
+            display: block;
+        }
+        .iran-plate-ir {
+            font-size: 9px;
+            font-weight: bold;
+            letter-spacing: 0.5px;
+            line-height: 1.2;
+        }
+        .iran-plate-center {
+            flex: 1;
+            background: #fff;
+            border-left: 2px solid #000;
+            border-right: 2px solid #000;
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            justify-content: center;
+            padding: 10px 8px;
+            gap: 2px 6px;
+            direction: ltr;
+        }
+        .iran-plate-main {
+            font-size: clamp(18px, 4.2vw, 28px);
+            font-weight: 800;
+            color: #000;
+            letter-spacing: 1px;
+        }
+        .iran-plate-letter {
+            font-size: clamp(20px, 4.8vw, 32px);
+            font-weight: 800;
+            color: #000;
+            margin: 0 2px;
+        }
+        .iran-plate-right {
+            width: 22%;
+            min-width: 58px;
+            background: #fff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 6px 4px;
+            direction: ltr;
+        }
+        .iran-plate-iran {
+            font-size: 11px;
+            font-weight: 700;
+            color: #000;
+            margin-bottom: 4px;
+        }
+        .iran-plate-city {
+            font-size: clamp(14px, 3.2vw, 20px);
+            font-weight: 800;
+            color: #000;
+        }
+        .iran-plate.iran-plate-sm {
+            max-width: 280px;
+            min-height: 68px;
+        }
+        .iran-plate.iran-plate-sm .iran-plate-main,
+        .iran-plate.iran-plate-sm .iran-plate-letter {
+            font-size: 16px;
+        }
+        .iran-plate.iran-plate-sm .iran-plate-city { font-size: 14px; }
+        .iran-plate.iran-plate-sm .iran-plate-ir { font-size: 7px; }
+        .iran-plate.iran-plate-sm .iran-plate-iran { font-size: 9px; }
+
+        /* ردیف توضیح پلاک: همیشه چپ به راست — بخش اول | حرف | بخش دوم | کد شهر */
+        .plate-parts-row {
+            direction: ltr;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 10px;
+        }
+        .plate-parts-row .plate-part-box {
+            flex: 1 1 22%;
+            min-width: 80px;
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 8px;
+            text-align: center;
+        }
     </style>
     
     {% block extra_css %}{% endblock %}
