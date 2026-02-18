@@ -1,5 +1,6 @@
 Django>=5.0
 ultralytics
+pytesseract
 opencv-python
 numpy
 Pillow
