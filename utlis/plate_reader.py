@@ -469,11 +469,16 @@ class IranianPlateReader:
     def _get_letter_region_crops(plate_image):
         """
         چند برش افقی از ناحیهٔ احتمالی حرف برای امتحان با OCR.
-        با چند پنجرهٔ کمی جابه‌جا شده احتمال تشخیص حرف را بالا می‌بریم.
+        پنجره‌های بیشتر و جابه‌جا شده برای پوشش پلاک‌های راست/چپ و کج.
         """
         crops = []
-        # پنجره‌های مختلف برای محل حرف (پلاک راست‌به‌چپ: حرف بعد از دو رقم اول)
-        for (left, right) in [(0.28, 0.48), (0.32, 0.52), (0.25, 0.55), (0.30, 0.50)]:
+        # پلاک راست‌به‌چپ: حرف بعد از دو رقم اول → حدود ۰.۲۵–۰.۵۵ عرض
+        # پلاک چپ‌به‌راست یا کج: حرف گاهی کمی جابه‌جا است
+        for (left, right) in [
+            (0.28, 0.48), (0.32, 0.52), (0.25, 0.55), (0.30, 0.50),
+            (0.22, 0.42), (0.35, 0.55), (0.26, 0.52), (0.33, 0.53),
+            (0.20, 0.45), (0.38, 0.58), (0.24, 0.50), (0.36, 0.56),
+        ]:
             c = IranianPlateReader._crop_letter_region(plate_image, left, right)
             if c is not None and c.size > 0:
                 crops.append(c)
@@ -522,6 +527,47 @@ class IranianPlateReader:
             cv2.GaussianBlur(gray, (3, 3), 0), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
         )
         return thresh
+
+    @staticmethod
+    def _preprocess_letter_adaptive(image, target_height=100):
+        """
+        پیش‌پردازش با آستانهٔ تطبیقی برای ناحیهٔ حرف (روشنایی ناهموار).
+        """
+        if image is None or image.size == 0:
+            return None
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = image.copy()
+        h, w = gray.shape[:2]
+        scale = target_height / max(h, 1)
+        new_w = max(20, int(w * scale))
+        gray = cv2.resize(gray, (new_w, target_height), interpolation=cv2.INTER_CUBIC)
+        gray = cv2.medianBlur(gray, 3)
+        thresh = cv2.adaptiveThreshold(
+            gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
+        )
+        return thresh
+
+    @staticmethod
+    def _preprocess_letter_variants(image, target_heights=(80, 100, 120)):
+        """
+        چند نوع پیش‌پردازش برای ناحیهٔ حرف: اندازه‌های مختلف، معکوس، و آستانهٔ تطبیقی.
+        """
+        if image is None or image.size == 0:
+            return []
+        out = []
+        for th in target_heights:
+            p = IranianPlateReader._preprocess_letter_for_ocr(image, target_height=th)
+            if p is not None:
+                out.append(p)
+        base = IranianPlateReader._preprocess_letter_for_ocr(image, target_height=100)
+        if base is not None:
+            out.append(cv2.bitwise_not(base))
+        adaptive = IranianPlateReader._preprocess_letter_adaptive(image, target_height=100)
+        if adaptive is not None:
+            out.append(adaptive)
+        return out
 
     @staticmethod
     def _preprocess_plate_farsi_ocr(image):
@@ -630,107 +676,168 @@ class IranianPlateReader:
     def _extract_letter_with_persian_ocr_repo(self, plate_image):
         """
         استخراج حرف با مدل CNN از پروژه Persian-letter-OCR در صورت وجود.
-        https://github.com/XSharifi/Persian-letter-OCR
-        ورودی مدل: تصویر ۲۸×۲۸ گرِیسکیل (حرف دست‌نویس/چاپی).
-        در صورت نصب ماژول persian_letter_ocr_helper و وجود وزن‌ها فراخوانی می‌شود.
+        چند برش از ناحیهٔ حرف امتحان می‌شود و در رای‌گیری شرکت داده می‌شود.
         """
         try:
             from .persian_letter_ocr_helper import predict_letter_from_plate_region
         except ImportError:
-            return None
-        letter_region = self._crop_letter_region(plate_image, 0.30, 0.50)
-        if letter_region is None or letter_region.size == 0:
-            return None
-        return predict_letter_from_plate_region(letter_region)
+            return []
+        candidates = []
+        for (left, right) in [(0.30, 0.50), (0.25, 0.55), (0.35, 0.55)]:
+            letter_region = self._crop_letter_region(plate_image, left, right)
+            if letter_region is None or letter_region.size == 0:
+                continue
+            c = predict_letter_from_plate_region(letter_region)
+            if c:
+                candidates.append((c, 0.7))
+        return candidates
 
-    def _extract_letter_from_ocr(self, plate_image):
+    def _collect_letter_candidates(self, plate_image):
         """
-        وقتی CharsYolo حرف نیاورده، حرف پلاک را با OCR استخراج می‌کنیم.
-        فرمت پلاک ایران: ۲ رقم + حرف + ۳ رقم + ۲ رقم. حرف در وسط پلاک است.
-        اول چند برش دقیق از ناحیهٔ حرف امتحان می‌شود (بهبود تشخیص حرف وسط).
+        جمع‌آوری همهٔ نامزدهای حرف از تمام روش‌ها و پیش‌پردازش‌ها با امتیاز (برای رای‌گیری).
+        Returns: list of (letter, score) where score ترجیحاً اطمینان OCR است.
         """
         PLATE_LETTERS = set("آابپتثجچحخدذرزژسشصضطظعغفقکگلمنوهی")
-        # ۱) برش‌های ناحیهٔ حرف با پیش‌پردازش قوی تک‌حرف + EasyOCR فقط حروف
+        candidates = []
+
+        def add(letter, score):
+            if letter and letter in PLATE_LETTERS:
+                candidates.append((letter, float(score)))
+
         reader = self._get_ocr_reader()
+        # آستانهٔ کم برای ناحیهٔ تک‌حرف تا حرف کم‌کنتراست هم گرفته شود
+        min_conf_letter_region = 0.06
+        min_conf_rest = 0.12
+
+        # ۱) برش‌های ناحیهٔ حرف + چند نوع پیش‌پردازش (ارتفاع مختلف + معکوس)
         if reader is not None:
             try:
                 for crop in self._get_letter_region_crops(plate_image):
+                    for processed in self._preprocess_letter_variants(crop):
+                        if processed is None:
+                            continue
+                        for (_, ocr_text, conf) in reader.readtext(processed):
+                            if conf < min_conf_letter_region:
+                                continue
+                            for c in ocr_text:
+                                add(c, conf)
                     processed = self._preprocess_letter_for_ocr(crop, target_height=80)
-                    if processed is None:
-                        continue
-                    for (_, ocr_text, conf) in reader.readtext(processed):
-                        if conf < 0.15:
-                            continue
-                        for c in ocr_text:
-                            if c in PLATE_LETTERS:
-                                return c
-            except Exception:
-                pass
-        # ۲) همان برش‌ها با پیش‌پردازش سبک Persian-OCR
-        if reader is not None:
-            try:
-                for crop in self._get_letter_region_crops(plate_image):
+                    if processed is not None:
+                        for (_, ocr_text, conf) in reader.readtext(processed):
+                            if conf < min_conf_letter_region:
+                                continue
+                            for c in ocr_text:
+                                add(c, conf)
                     processed = self._preprocess_for_persian_letter(crop)
-                    if processed is None:
-                        continue
-                    for (_, ocr_text, conf) in reader.readtext(processed):
-                        if conf < 0.2:
-                            continue
-                        for c in ocr_text:
-                            if c in PLATE_LETTERS:
-                                return c
+                    if processed is not None:
+                        for (_, ocr_text, conf) in reader.readtext(processed):
+                            if conf < min_conf_letter_region:
+                                continue
+                            for c in ocr_text:
+                                add(c, conf)
             except Exception:
                 pass
-        # ۳) پیش‌پردازش کل پلاک و OCR (حرف از کل متن)
-        if reader is not None:
-            try:
-                processed = self._preprocess_for_persian_letter(plate_image)
-                if processed is not None:
-                    for (_, ocr_text, conf) in reader.readtext(processed):
-                        if conf < 0.2:
-                            continue
-                        for c in ocr_text:
-                            if c in PLATE_LETTERS:
-                                return c
-            except Exception:
-                pass
-        # ۴) برش ناحیه وسط (روش قبلی)
+
+        # ۲) ناحیه وسط و کل پلاک
         if reader is not None:
             try:
                 h, w = plate_image.shape[:2]
                 if w >= 20:
                     center_roi = plate_image[:, int(w * 0.25) : int(w * 0.75)]
-                    processed_center = self._preprocess_for_persian_letter(center_roi)
-                    if processed_center is not None:
-                        for (_, ocr_text, conf) in reader.readtext(processed_center):
-                            if conf < 0.2:
-                                continue
-                            for c in ocr_text:
-                                if c in PLATE_LETTERS:
-                                    return c
-            except Exception:
-                pass
-        # ۵) پیش‌پردازش عمومی پلاک و OCR
-        if reader is not None:
-            try:
-                processed = self._preprocess_plate_image(plate_image)
-                for (_, ocr_text, conf) in reader.readtext(processed):
-                    if conf < 0.2:
+                    center_img = self._preprocess_for_persian_letter(center_roi)
+                    if center_img is not None:
+                        for (_, ocr_text, conf) in reader.readtext(center_img):
+                            if conf >= min_conf_rest:
+                                for c in ocr_text:
+                                    add(c, conf)
+                for img in [
+                    self._preprocess_for_persian_letter(plate_image),
+                    self._preprocess_plate_image(plate_image),
+                ]:
+                    if img is None:
                         continue
-                    for c in ocr_text:
-                        if c in PLATE_LETTERS:
-                            return c
+                    for (_, ocr_text, conf) in reader.readtext(img):
+                        if conf >= min_conf_rest:
+                            for c in ocr_text:
+                                add(c, conf)
             except Exception:
                 pass
-        # ۶) Tesseract فقط حروف (برش ناحیه حرف + کل)
+
+        # ۳) Tesseract: چند برش و کل پلاک
+        try:
+            import pytesseract
+            config_letters = r'-l fas --psm 7 -c tessedit_char_whitelist="آابپتثجچحخدذرزژسشصضطظعغفقکگلمنوهی"'
+            for crop in self._get_letter_region_crops(plate_image):
+                for proc in [self._preprocess_letter_for_ocr(crop, 100), self._preprocess_for_persian_letter(crop)]:
+                    if proc is None:
+                        continue
+                    try:
+                        text = pytesseract.image_to_string(proc, config=config_letters)
+                        for c in (text or "").strip():
+                            add(c, 0.5)
+                    except Exception:
+                        pass
+            for img in [self._preprocess_for_persian_letter(plate_image), self._preprocess_plate_image(plate_image)]:
+                if img is None:
+                    continue
+                try:
+                    text = pytesseract.image_to_string(img, config=config_letters)
+                    for c in (text or "").strip():
+                        add(c, 0.4)
+                except Exception:
+                    pass
+        except ImportError:
+            pass
+
+        # ۴) مدل CNN Persian-letter-OCR (چند برش)
+        for letter, score in self._extract_letter_with_persian_ocr_repo(plate_image):
+            add(letter, score)
+
+        return candidates
+
+    @staticmethod
+    def _vote_letter(candidates):
+        """
+        از لیست (letter, score) حرفی را انتخاب کن که بیشترین رای یا بیشترین مجموع امتیاز را دارد.
+        """
+        if not candidates:
+            return None
+        from collections import defaultdict
+        total_score = defaultdict(float)
+        count = defaultdict(int)
+        for letter, score in candidates:
+            total_score[letter] += score
+            count[letter] += 1
+        # ترجیح: اول بیشترین تعداد رای، بعد بیشترین مجموع امتیاز
+        best = max(
+            total_score.keys(),
+            key=lambda c: (count[c], total_score[c])
+        )
+        return best
+
+    def _extract_letter_from_ocr(self, plate_image):
+        """
+        وقتی CharsYolo حرف نیاورده، حرف پلاک را با OCR استخراج می‌کنیم.
+        از چند برش، چند پیش‌پردازش و چند موتور OCR استفاده می‌شود و با رای‌گیری نهایی حرف انتخاب می‌شود.
+        """
+        candidates = self._collect_letter_candidates(plate_image)
+        letter = self._vote_letter(candidates)
+        if letter:
+            return letter
+        # fallback: همان مسیر قدیمی فقط برای یک بار امتحان سریع
+        PLATE_LETTERS = set("آابپتثجچحخدذرزژسشصضطظعغفقکگلمنوهی")
         letter_tesseract = self._extract_letter_with_tesseract(plate_image)
-        if letter_tesseract:
+        if letter_tesseract and letter_tesseract in PLATE_LETTERS:
             return letter_tesseract
-        # ۷) اختیاری: مدل CNN از پروژه Persian-letter-OCR
-        letter_cnn = self._extract_letter_with_persian_ocr_repo(plate_image)
-        if letter_cnn:
-            return letter_cnn
-        return None
+        letter_cnn = None
+        try:
+            from .persian_letter_ocr_helper import predict_letter_from_plate_region
+            letter_region = self._crop_letter_region(plate_image, 0.30, 0.50)
+            if letter_region is not None and letter_region.size > 0:
+                letter_cnn = predict_letter_from_plate_region(letter_region)
+        except ImportError:
+            pass
+        return letter_cnn if letter_cnn else None
 
     def _extract_letter_with_tesseract(self, plate_image):
         """
