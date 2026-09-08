@@ -1,148 +1,61 @@
-# 🚗🆔 سیستم تشخیص خودرو و خواندن پلاک با Django
+# Persian Plate Detector
 
-یک سیستم تشخیص خودرو و خواندن پلاک ایرانی مبتنی بر هوش مصنوعی با استفاده از YOLOv8، EasyOCR و Django
+Detects vehicles and reads Iranian license plates from images, using YOLOv8, EasyOCR, and Django.
 
-## ✨ ویژگی‌ها
+## Features
 
-- 📸 آپلود تصویر با رابط کاربری زیبا و مدرن
-- 🤖 تشخیص خودکار خودروها (ماشین، موتور، اتوبوس، کامیون)
-- 🆔 **تشخیص و خواندن پلاک ایرانی** (جدید!)
-- 🔤 **پردازش متن پلاک با فرمت ایرانی** (2 رقم + حرف فارسی + 3 رقم + 2 رقم)
-- 🎨 رسم کادر رنگی دور خودروها و پلاک‌های شناسایی شده
-- 📊 نمایش آمار و جزئیات تشخیص خودرو و پلاک
-- 📜 تاریخچه تمام تصاویر و پلاک‌های پردازش شده
-- 🌐 رابط کاربری فارسی و RTL
+- Vehicle detection (car, motorcycle, bus, truck) via YOLOv8
+- Iranian plate localization with a dedicated plate model
+- Plate text recognition via EasyOCR, parsed into the standard Iranian format (2 digits + letter + 3 digits + 2 digits)
+- Web UI with detection history
 
-## 🎯 نحوه کار سیستم
+## How it works
 
-1. **تشخیص خودرو**: سیستم ابتدا خودروهای موجود در تصویر را با استفاده از YOLOv8 شناسایی می‌کند
-2. **تشخیص محل پلاک**: برای هر خودرو، محل پلاک با مدل YOLOv5 مخصوص پلاک فارسی (plateYolo.pt) یا در صورت نبود مدل با پردازش تصویر یافت می‌شود
-3. **خواندن متن پلاک**: متن پلاک با استفاده از EasyOCR (با پشتیبانی زبان فارسی) خوانده می‌شود
-4. **تجزیه فرمت پلاک**: متن پلاک به اجزای خود (2 رقم + حرف + 3 رقم + 2 رقم) تجزیه می‌شود
-5. **نمایش نتایج**: تصویر پردازش شده با کادرهای خودرو، پلاک و متن پلاک نمایش داده می‌شود
+1. Detect vehicles in the image (YOLOv8)
+2. Locate the plate on each vehicle (`plateYolo.pt`, falling back to image processing if unavailable)
+3. Read the plate text (EasyOCR)
+4. Parse the text into the Iranian plate format
+5. Return the annotated image with results
 
-## 📦 نصب و راه‌اندازی
+## Installation
 
-### پیش‌نیازها
-
-- Python 3.8 یا بالاتر
-- pip (مدیر بسته‌های Python)
-
-### مراحل نصب
-
-1. **کلون کردن مخزن**:
-```cmd
-git clone <repository-url>
-cd plate-detector
-```
-
-2. **نصب کتابخانه‌های مورد نیاز**:
-```cmd
+```bash
+git clone https://github.com/Amirmn24/persian-plate-detector.git
+cd persian-plate-detector
 pip install -r requirements.txt
-```
-   در ویندوز اگر با خطای `'pip' is not recognized` مواجه شدید، از این دستور استفاده کنید:
-```cmd
-py -m pip install -r requirements.txt
-```
 
-3. **اعمال migrations به دیتابیس**:
-```cmd
-python manage.py makemigrations
 python manage.py migrate
+python manage.py runserver
 ```
 
-4. **ایجاد سوپریوزر (اختیاری)**:
-```cmd
-python manage.py createsuperuser
-```
+Open `http://127.0.0.1:8000`.
 
-5. **اجرای سرور توسعه**:
-```cmd
-python manage.py runserver 127.0.0.1:8000
-```
+### Models
 
-6. **باز کردن مرورگر**:
-```
-http://127.0.0.1:8000
-```
+The YOLOv8 vehicle model downloads automatically on first run. For the plate detection model:
 
-## 🔧 تنظیمات
-
-### دانلود مدل YOLOv8 (تشخیص خودرو)
-
-اولین بار که برنامه را اجرا می‌کنید، مدل YOLOv8 به صورت خودکار دانلود می‌شود. برای دانلود از قبل:
-
-```cmd
-python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
-```
-
-### دانلود مدل تشخیص پلاک (plateYolo.pt)
-
-برای **تشخیص دقیق پلاک** باید مدل مخصوص پلاک فارسی را داشته باشید. این مدل از پروژه [persian-license-plate-recognition](https://github.com/truthofmatthew/persian-license-plate-recognition) است:
-
-```cmd
+```bash
 python download_plate_model.py
 ```
 
-اگر دانلود خودکار ناموفق بود، فایل `plateYolo.pt` را از [صفحه مدل‌های PLPR](https://github.com/truthofmatthew/persian-license-plate-recognition/tree/main/model) دانلود کنید و در پوشه `model` با همین نام ذخیره کنید. بدون این فایل، سیستم فقط از روش تشخیص با رنگ/شکل استفاده می‌کند.
+If that fails, download `plateYolo.pt` manually from [persian-license-plate-recognition](https://github.com/truthofmatthew/persian-license-plate-recognition/tree/main/model) and place it in `model/`. For better character extraction, add `CharsYolo.pt` from the same repo — otherwise plate text falls back to EasyOCR.
 
-برای **استخراج اعداد و حرف فارسی از روی پلاک** (مثلاً «۱۲ پ ۳۴۵ - ۶۷») مدل `CharsYolo.pt` از همان صفحه را هم در پوشه `model` قرار دهید. در صورت نبود این فایل، از EasyOCR برای خواندن متن پلاک استفاده می‌شود.
-
-### تنظیمات EasyOCR
-
-EasyOCR در اولین اجرا، مدل‌های زبان فارسی و انگلیسی را دانلود می‌کند. این فرآیند ممکن است چند دقیقه طول بکشد.
-
-## 💡 نکات مهم
-
-- **کیفیت تصویر**: برای نتایج بهتر، از تصاویر با کیفیت بالا و نور مناسب استفاده کنید
-- **زاویه پلاک**: پلاک باید تا حد امکان رو به دوربین باشد
-- **اندازه تصویر**: تصاویر بزرگتر (HD یا بالاتر) نتایج بهتری دارند
-- **فرمت پلاک**: سیستم فقط با پلاک‌های ایرانی با فرمت استاندارد کار می‌کند
-
-## 🛠️ فناوری‌های استفاده شده
-
-- **Backend**: Django 5.0
-- **AI/ML**: 
-  - YOLOv8 (Ultralytics) - تشخیص خودرو
-  - EasyOCR - تشخیص و خواندن متن فارسی
-- **Image Processing**: OpenCV
-- **Frontend**: HTML5, CSS3, JavaScript, Bootstrap 5
-- **Database**: SQLite (پیش‌فرض)
-
-## 📁 ساختار پروژه
+## Project structure
 
 ```
-plate-detector/
-├── detector/              # اپلیکیشن اصلی Django
-│   ├── models.py         # مدل‌های دیتابیس
-│   ├── views.py          # ویوها و لاجیک
-│   └── forms.py          # فرم‌ها
-├── utlis/                # ماژول‌های کمکی
-│   ├── vehicle_detector.py   # تشخیص خودرو
-│   └── plate_reader.py       # تشخیص و خواندن پلاک
-├── templates/            # تمپلیت‌های HTML
-├── media/               # فایل‌های آپلود شده
-├── manage.py
-└── requirements.txt
+persian-plate-detector/
+├── detector/     # Django app (models, views, forms)
+├── utlis/        # vehicle detection & plate reading
+├── templates/    # HTML templates
+├── config/       # Django settings
+├── models/       # YOLO model files
+└── manage.py
 ```
 
-## 🤝 مشارکت
+## Tech stack
 
-برای مشارکت در این پروژه:
+Django · YOLOv8 (Ultralytics) · EasyOCR · OpenCV · Bootstrap 5 · SQLite
 
-1. Fork کنید
-2. یک Branch جدید بسازید (`git checkout -b feature/AmazingFeature`)
-3. تغییرات خود را Commit کنید (`git commit -m 'Add some AmazingFeature'`)
-4. به Branch خود Push کنید (`git push origin feature/AmazingFeature`)
-5. یک Pull Request باز کنید
+## License
 
-## 📝 لایسنس
-
-این پروژه تحت لایسنس MIT منتشر شده است.
-
-## 🙏 تشکر
-
-- [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics)
-- [EasyOCR](https://github.com/JaidedAI/EasyOCR)
-- [Django](https://www.djangoproject.com/)
-- [OpenCV](https://opencv.org/)
+MIT

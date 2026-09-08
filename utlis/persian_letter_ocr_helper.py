@@ -105,7 +105,7 @@ def _preprocess_to_28x28(image):
     return flat.reshape(1, -1)
 
 
-# سنسور CNN و session به صورت lazy برای جلوگیری از import سنگین
+# سنسور CNN و session به صورت lazy برای جلوگیری از import سنگین5
 _cnn_session = None
 _cnn_predict_fn = None
 
